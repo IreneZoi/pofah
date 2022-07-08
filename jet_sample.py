@@ -40,6 +40,7 @@ class JetSample():
 
     @classmethod
     def from_input_dir(cls, name, path, read_n=None, **cuts):
+        print(path)
         df, _ = dr.DataReader(path).read_jet_features_from_dir(read_n=read_n, features_to_df=True, **cuts)
         # convert any QR-selection colums from 0/1 to bool
         sel_cols = [c for c in df if c.startswith('sel')]
@@ -82,8 +83,17 @@ class JetSample():
     def sample(self, n):
         ''' sample n events from sample at random '''
         cls = type(self)
+        print(" in sampling data of type ",type(self.data))
         new_dat = self.data.sample(n=n)
         return cls(name=self.name+'_sampled', data=new_dat, title=' '.join([self.title,'sampled']) )
+
+    def sample_frac(self, frac):
+        ''' sample fraction frac events from sample at random '''
+        cls = type(self)
+        print(" in sampling data of type ",type(self.data))
+        new_dat = self.data.sample(frac=frac)
+        return cls(name=self.name+'_sampled', data=new_dat, title=' '.join([self.title,'sampled']) )
+    
 
     def merge(self, other, shuffle=True):
         ''' merge this and other jet sample and return new union JetSample object '''
@@ -131,15 +141,19 @@ class JetSample():
         return dat_self.equals(dat_other)
 
     
-    def dump(self, path):
+    def dump(self, path, fold=-1):
         dump_data = self.data
         sel_cols = [c for c in self.data if c.startswith('sel')]
         if sel_cols: # convert selection column to int for writing
             dump_data = self.data.copy()
             for sel in sel_cols:
                 dump_data[sel] = dump_data[sel].astype(int)
-        rw.write_jet_sample_to_file(dump_data.values, list(dump_data.columns), path)
-        print('written data sample to {}'.format(path))
+        if fold < 0:
+            rw.write_jet_sample_to_file(dump_data.values, list(dump_data.columns), path)
+            print('written data sample to {}'.format(path))
+        else:
+            rw.write_jet_sample_to_file(dump_data.values, list(dump_data.columns), path.replace('.h5','_fold_%s.h5'%str(fold)))
+            print('written data sample to {}'.format(path.replace('.h5','_fold_%s.h5'%str(fold))))
         
     def __repr__(self):
         return self.name
@@ -148,7 +162,7 @@ class JetSample():
         return self.name.replace(' ', '_')
         
 
-def split_jet_sample_train_test(jet_sample, frac, new_names=None):
+def split_jet_sample_train_test(jet_sample, frac, new_names=None, which_fold=-1, nfold=-1):
     
     """ shuffles and splits dataset into training-set and testing-set accorinding to fraction frac """
     cls = type(jet_sample)
@@ -156,7 +170,29 @@ def split_jet_sample_train_test(jet_sample, frac, new_names=None):
     df_copy = jet_sample.data.copy()
 
     N = df_copy.shape[0]
-    shuffled = df_copy.sample(frac=1.).reset_index(drop=True) # shuffle original data
+    shuffled = df_copy.sample(frac=1.,random_state=12345).reset_index(drop=True) # shuffle original data
+    if which_fold < 0:
+        first = shuffled[:int(N*frac)].reset_index(drop=True)
+        second = shuffled[int(N*frac):].reset_index(drop=True)
+    else:
+        first = shuffled[int((which_fold/nfold)*int(N)):int(((which_fold+1)/nfold)*int(N))].reset_index(drop=True)
+        second1 = shuffled[:int((which_fold/nfold)*int(N))].reset_index(drop=True)
+        second2 = shuffled[int(((which_fold+1)/nfold)*int(N)):].reset_index(drop=True)
+        second = pd.concat([second1,second2])
+
+    return [cls(new_names[0], first), cls(new_names[1], second)]
+
+
+
+def split_jet_sample_kfold(jet_sample, frac, new_names=None):
+    
+    """ shuffles and splits dataset into training-set and testing-set accorinding to fraction frac """
+    cls = type(jet_sample)
+    new_names = new_names or (jet_sample.name+'Train', jet_sample.name+'Test')
+    df_copy = jet_sample.data.copy()
+
+    N = df_copy.shape[0]
+    shuffled = df_copy.sample(frac=1.,random_state=12345).reset_index(drop=True) # shuffle original data
     first = shuffled[:int(N*frac)].reset_index(drop=True)
     second = shuffled[int(N*frac):].reset_index(drop=True)
     
